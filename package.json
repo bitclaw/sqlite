@@ -1,0 +1,48 @@
+{
+  "name": "@bitclaw/sqlite",
+  "version": "0.2.0",
+  "description": "High-performance SQLite worker pool and utilities using bun:sqlite",
+  "files": ["dist", "scripts", "LICENSE", "README.md"],
+  "type": "module",
+  "exports": {
+    "./pool": { "types": "./dist/pool.d.ts", "default": "./dist/pool.js" },
+    "./worker": { "types": "./dist/worker.d.ts", "default": "./dist/worker.js" },
+    "./connection": { "types": "./dist/connection.d.ts", "default": "./dist/connection.js" },
+    "./json-cache": { "types": "./dist/json-cache.d.ts", "default": "./dist/json-cache.js" },
+    "./retry": { "types": "./dist/retry.d.ts", "default": "./dist/retry.js" },
+    "./write-mutex": { "types": "./dist/write-mutex.d.ts", "default": "./dist/write-mutex.js" },
+    "./prisma-immediate-tx": { "types": "./dist/prisma-immediate-tx.d.ts", "default": "./dist/prisma-immediate-tx.js" },
+    "./query-logger": { "types": "./dist/query-logger.d.ts", "default": "./dist/query-logger.js" },
+    "./ttl-cache": { "types": "./dist/ttl-cache.d.ts", "default": "./dist/ttl-cache.js" },
+    "./cache-lock": { "types": "./dist/cache-lock.d.ts", "default": "./dist/cache-lock.js" },
+    "./load-test-utils": { "types": "./dist/scripts/load-test-utils.d.ts", "default": "./dist/scripts/load-test-utils.js" }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write",
+    "knip": "knip",
+    "benchmark": "bun scripts/benchmark.ts",
+    "benchmark:quick": "bun scripts/benchmark.ts --quick",
+    "prepublishOnly": "npm run build && npm run test",
+    "publish:dev": "npm run build && npm publish --tag dev --access public",
+    "publish:patch": "npm whoami && npm version patch && git push --follow-tags && npm publish --access public",
+    "publish:minor": "npm whoami && npm version minor && git push --follow-tags && npm publish --access public",
+    "publish:major": "npm whoami && npm version major && git push --follow-tags && npm publish --access public"
+  },
+  "keywords": ["sqlite", "bun", "worker-pool", "json-cache", "ttl-cache"],
+  "author": "bitclaw",
+  "license": "MIT",
+  "engines": { "bun": ">=1.3.0" },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "knip": "^6.12.1",
+    "@types/bun": "^1.3.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3"
+  }
+}
