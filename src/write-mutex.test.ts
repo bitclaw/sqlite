@@ -28,7 +28,7 @@ describe('WriteMutex', () => {
         order.push(id * 10);
       });
 
-    // Start both concurrently — op1 should complete before op2 starts
+    // Start both concurrently - op1 should complete before op2 starts
     await Promise.all([op(1, 50), op(2, 10)]);
 
     expect(order).toEqual([1, 10, 2, 20]);

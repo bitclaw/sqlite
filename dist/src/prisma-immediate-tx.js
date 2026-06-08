@@ -3,7 +3,7 @@
 //
 // Prisma's $transaction() uses BEGIN DEFERRED by default. When a deferred
 // transaction tries to upgrade from read to write lock, SQLite returns
-// SQLITE_BUSY *immediately* — bypassing busy_timeout entirely.
+// SQLITE_BUSY *immediately* - bypassing busy_timeout entirely.
 //
 // This helper wraps writes in BEGIN IMMEDIATE via $executeRawUnsafe,
 // which acquires the write lock upfront and respects busy_timeout.

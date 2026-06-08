@@ -1,11 +1,11 @@
 // packages/sqlite/src/query-logger.ts
-// Dev-mode query logging for bun:sqlite — mirrors Prisma's `prisma:query` output.
+// Dev-mode query logging for bun:sqlite - mirrors Prisma's `prisma:query` output.
 // Wraps a Database with a transparent Proxy that logs SQL on query/run/exec/prepare.
 // Zero overhead in production: returns the database as-is when NODE_ENV !== 'development'.
 // biome-ignore lint/suspicious/noConsole: intentional dev-mode query logging (mirrors Prisma's log: ['query'])
 const log = console.log;
 const isDev = process.env.NODE_ENV === 'development';
-// ANSI green for the prefix — contrasts with Prisma's blue `prisma:query`
+// ANSI green for the prefix - contrasts with Prisma's blue `prisma:query`
 const GREEN = '\x1b[32m';
 const RESET = '\x1b[0m';
 const formatSql = (sql) => sql.replace(/\s+/g, ' ').trim();
@@ -19,7 +19,7 @@ const formatSql = (sql) => sql.replace(/\s+/g, ' ').trim();
  *
  * In production, returns the database unchanged (zero overhead).
  *
- * Usage — always wrap, logging auto-enables in dev:
+ * Usage - always wrap, logging auto-enables in dev:
  *
  *   const db = wrapWithQueryLogging(new Database(path), { label: 'ws:abc123' });
  */

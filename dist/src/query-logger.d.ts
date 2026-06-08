@@ -13,7 +13,7 @@ export type QueryLoggerOptions = {
  *
  * In production, returns the database unchanged (zero overhead).
  *
- * Usage — always wrap, logging auto-enables in dev:
+ * Usage - always wrap, logging auto-enables in dev:
  *
  *   const db = wrapWithQueryLogging(new Database(path), { label: 'ws:abc123' });
  */

@@ -53,7 +53,7 @@ mock.module('node:module', () => ({
 // =============================================================================
 
 // We'll use a timestamp-based import to bust the module cache.
-// For bun, we can use `Loader.registry.delete` — but that's internal.
+// For bun, we can use `Loader.registry.delete` - but that's internal.
 // Instead, we'll design tests to work with the singleton constraint.
 // Tests that create pools will shut them down; each test manages its own lifecycle.
 
@@ -184,7 +184,7 @@ describe('Query execution', () => {
   test('given query exceeds timeout, when exec called, then rejects with timeout', async () => {
     mod.createPool({ poolSize: 1, timeout: 50 });
 
-    // Don't respond — let it timeout
+    // Don't respond - let it timeout
     expect(mod.exec('SELECT sleep()')).rejects.toThrow('timed out');
   });
 });

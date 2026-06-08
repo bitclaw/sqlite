@@ -40,7 +40,7 @@ export class CacheLock {
         const result = this.db.transaction(() => {
             // Remove expired lock for this key first
             this.deleteExpiredStmt.run({ $key: key, $now: now });
-            // Try to insert — OR IGNORE means it fails silently if key exists
+            // Try to insert - OR IGNORE means it fails silently if key exists
             this.acquireStmt.run({
                 $key: key,
                 $owner: actualOwner,

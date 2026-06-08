@@ -8,7 +8,7 @@ import { parentPort, workerData } from 'node:worker_threads';
 const isDevelopment = process.env.NODE_ENV === 'development';
 const isTest = process.env.NODE_ENV === 'test';
 
-// Statement type alias for our cache (dynamic SQL — row shape unknown, params accept any binding)
+// Statement type alias for our cache (dynamic SQL - row shape unknown, params accept any binding)
 type CachedStatement = Statement<unknown>;
 
 // ---------------------------------------------------------------------------

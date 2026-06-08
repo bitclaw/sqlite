@@ -13,7 +13,7 @@ export type TTLCacheOptions = {
  * `maxSize`.
  *
  * Unlike WeakMap per-request caching (which deduplicates within a single
- * request), TTLCache deduplicates across requests — e.g. when TanStack
+ * request), TTLCache deduplicates across requests - e.g. when TanStack
  * Router replays `beforeLoad` on client hydration, the server returns the
  * cached result instantly (0 DB queries).
  *

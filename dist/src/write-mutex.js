@@ -2,7 +2,7 @@
 // Promise-based per-resource write mutex for SQLite concurrency
 /**
  * A simple async mutex that serializes write access to a resource.
- * Bun is single-threaded, so this works as a plain promise queue —
+ * Bun is single-threaded, so this works as a plain promise queue -
  * no atomic operations needed.
  */
 export class WriteMutex {

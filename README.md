@@ -36,7 +36,7 @@ Based on benchmarks from SecureLogin project:
 - **100% success rate** under load
 - **Prepared statement cache hit rate**: 100%
 
-These numbers reflect **direct SQLite pool operations** — no HTTP server, no ORM, no middleware. Application-level throughput (through TanStack Start + Prisma + SSR) will be lower. Use `bun run test:load` in each app for end-to-end numbers.
+These numbers reflect **direct SQLite pool operations** - no HTTP server, no ORM, no middleware. Application-level throughput (through TanStack Start + Prisma + SSR) will be lower. Use `bun run test:load` in each app for end-to-end numbers.
 
 ## Benchmarking Methodology
 
@@ -155,7 +155,7 @@ await cache.delete('user:123');
 
 ### Query Logger
 
-Dev-mode SQL logging for bun:sqlite — mirrors Prisma's `prisma:query` output. Zero overhead in production.
+Dev-mode SQL logging for bun:sqlite - mirrors Prisma's `prisma:query` output. Zero overhead in production.
 
 ```typescript
 import { Database } from 'bun:sqlite';
@@ -194,7 +194,7 @@ bootstrapCache.set(sessionId, data);
 return data;
 ```
 
-Unlike `WeakMap` per-request caching (which deduplicates within a single SSR request), `TTLCache` deduplicates **across** HTTP requests — e.g. when TanStack Router replays `beforeLoad` on client hydration, the server returns the cached result instantly (0 DB queries).
+Unlike `WeakMap` per-request caching (which deduplicates within a single SSR request), `TTLCache` deduplicates **across** HTTP requests - e.g. when TanStack Router replays `beforeLoad` on client hydration, the server returns the cached result instantly (0 DB queries).
 
 ## Configuration
 
