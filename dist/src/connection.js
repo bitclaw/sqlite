@@ -12,20 +12,14 @@ export function initializeConnection(config) {
     });
     // Apply optimal PRAGMA settings
     if (config.path !== ':memory:') {
-        // WAL mode for better concurrency
         db.run('PRAGMA journal_mode = WAL');
-        // Reduced busy timeout for worker coordination
-        db.run('PRAGMA busy_timeout = 5000');
-        // More frequent checkpoints
-        db.run('PRAGMA wal_autocheckpoint = 100');
-        // Note: cache_shared is not available in bun:sqlite
+        db.run('PRAGMA busy_timeout = 10000');
     }
-    // Performance optimizations
     db.run('PRAGMA foreign_keys = ON');
-    db.run('PRAGMA synchronous = NORMAL'); // Safe with WAL
-    db.run('PRAGMA cache_size = -4000'); // 4MB cache
+    db.run('PRAGMA synchronous = NORMAL');
+    db.run('PRAGMA cache_size = -20000'); // 20MB cache
     db.run('PRAGMA temp_store = MEMORY');
-    db.run('PRAGMA mmap_size = 67108864'); // 64MB mmap
+    db.run('PRAGMA mmap_size = 268435456'); // 256MB mmap
     // Query optimizer
     db.run('PRAGMA optimize');
     return db;
