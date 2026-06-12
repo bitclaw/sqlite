@@ -3,53 +3,9 @@
 // Uses bun:sqlite for 3-6x faster reads compared to better-sqlite3
 import { Database } from 'bun:sqlite';
 import { parentPort, workerData } from 'node:worker_threads';
+import { StatementCache } from './statement-cache';
 const isDevelopment = process.env.NODE_ENV === 'development';
 const isTest = process.env.NODE_ENV === 'test';
-// ---------------------------------------------------------------------------
-// Prepared-statement LRU cache for optimal performance
-// ---------------------------------------------------------------------------
-class StatementCache {
-    cache = new Map();
-    maxSize = 256;
-    hits = 0;
-    misses = 0;
-    get(sql) {
-        const stmt = this.cache.get(sql);
-        if (stmt) {
-            this.hits += 1;
-            // Move to end (LRU behavior)
-            this.cache.delete(sql);
-            this.cache.set(sql, stmt);
-            return stmt;
-        }
-        return null;
-    }
-    set(sql, stmt) {
-        this.misses += 1;
-        // If at capacity, remove oldest
-        if (this.cache.size >= this.maxSize) {
-            const firstKey = this.cache.keys().next().value;
-            if (firstKey) {
-                this.cache.delete(firstKey);
-            }
-        }
-        this.cache.set(sql, stmt);
-    }
-    getStats() {
-        const total = this.hits + this.misses;
-        return {
-            hits: this.hits,
-            misses: this.misses,
-            size: this.cache.size,
-            hitRate: total > 0 ? (this.hits / total) * 100 : 0
-        };
-    }
-    clear() {
-        this.cache.clear();
-        this.hits = 0;
-        this.misses = 0;
-    }
-}
 const stmtCache = new StatementCache();
 // Worker-specific database configuration
 async function getDbConfig() {
@@ -89,16 +45,7 @@ async function getDbConfig() {
     };
 }
 function getOrCreateStatement(db, sql) {
-    // Normalize SQL for better cache hits
-    const normalizedSql = sql.trim().replace(/\s+/g, ' ');
-    let stmt = stmtCache.get(normalizedSql);
-    if (stmt) {
-        return stmt;
-    }
-    // Cache miss → prepare + insert (bun:sqlite uses .query() instead of .prepare())
-    stmt = db.query(normalizedSql);
-    stmtCache.set(normalizedSql, stmt);
-    return stmt;
+    return stmtCache.getOrPrepare(db, sql);
 }
 // SQLite Worker class
 export class SQLiteWorker {
@@ -122,27 +69,15 @@ export class SQLiteWorker {
                 create: !this.config.options.fileMustExist,
                 readonly: false
             });
-            // ✅ OPTIMIZED: Enhanced multi-worker SQLite configuration
-            // bun:sqlite uses run() for PRAGMA statements instead of pragma()
             if (this.config.path !== ':memory:') {
-                // WAL mode with optimized settings
                 this.db.run('PRAGMA journal_mode = WAL');
-                // ✅ CRITICAL: Reduced timeout for better worker coordination
-                this.db.run('PRAGMA busy_timeout = 5000');
-                // ✅ PERFORMANCE: More frequent checkpoints for multi-worker
-                this.db.run('PRAGMA wal_autocheckpoint = 100');
-                // ✅ CONCURRENCY: Enable shared cache for same-process workers
-                // Note: cache_shared is not available in bun:sqlite, skip it
+                this.db.run('PRAGMA busy_timeout = 10000');
             }
-            // ✅ PERFORMANCE: Optimized PRAGMA settings for workers
             this.db.run('PRAGMA foreign_keys = ON');
-            this.db.run('PRAGMA synchronous = NORMAL'); // Optimal for WAL mode
-            // ✅ MEMORY: 4MB per worker cache
-            this.db.run('PRAGMA cache_size = -4000');
+            this.db.run('PRAGMA synchronous = NORMAL');
+            this.db.run('PRAGMA cache_size = -20000'); // 20MB cache
             this.db.run('PRAGMA temp_store = MEMORY');
-            // ✅ CONCURRENCY: Optimized mmap for multi-worker
-            this.db.run('PRAGMA mmap_size = 67108864'); // 64MB
-            // ✅ PERFORMANCE: Enable query planner optimizations
+            this.db.run('PRAGMA mmap_size = 268435456'); // 256MB mmap
             this.db.run('PRAGMA optimize');
         }
         catch (error) {
