@@ -49,6 +49,13 @@ export type EndpointConfig = {
   headers?: Record<string, string>;
   /** Human-readable label */
   label?: string;
+  /**
+   * Per-worker cookie pool. When set, each concurrent worker i receives
+   * `Cookie: cookiePool[i % cookiePool.length]` instead of the shared
+   * `headers.Cookie`. Use for multi-user load tests where each worker
+   * should hit a distinct session/DB.
+   */
+  cookiePool?: string[];
 };
 
 export type RequestResult = {
@@ -193,9 +200,13 @@ async function runScenario(
 
   // Warm-up phase
   if (warmupRequests > 0) {
+    const warmupHeaders =
+      endpoint.cookiePool && endpoint.cookiePool.length > 0
+        ? { ...endpoint.headers, Cookie: endpoint.cookiePool[0]! }
+        : endpoint.headers;
     const warmups = Array.from(
       { length: Math.min(warmupRequests, concurrency) },
-      () => measureResponseTime(url, method, endpoint.body, endpoint.headers)
+      () => measureResponseTime(url, method, endpoint.body, warmupHeaders)
     );
     await Promise.allSettled(warmups);
   }
@@ -204,9 +215,13 @@ async function runScenario(
   const results: RequestResult[] = [];
   const endTs = performance.now() + durationSec * 1000;
 
-  const workers = Array.from({ length: concurrency }, () =>
-    workerLoop(url, method, endpoint.body, endpoint.headers, endTs, results)
-  );
+  const workers = Array.from({ length: concurrency }, (_, i) => {
+    const headers =
+      endpoint.cookiePool && endpoint.cookiePool.length > 0
+        ? { ...endpoint.headers, Cookie: endpoint.cookiePool[i % endpoint.cookiePool.length]! }
+        : endpoint.headers;
+    return workerLoop(url, method, endpoint.body, headers, endTs, results);
+  });
   await Promise.allSettled(workers);
 
   // Calculate metrics

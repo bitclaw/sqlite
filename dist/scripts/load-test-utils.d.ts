@@ -44,6 +44,13 @@ export type EndpointConfig = {
     headers?: Record<string, string>;
     /** Human-readable label */
     label?: string;
+    /**
+     * Per-worker cookie pool. When set, each concurrent worker i receives
+     * `Cookie: cookiePool[i % cookiePool.length]` instead of the shared
+     * `headers.Cookie`. Use for multi-user load tests where each worker
+     * should hit a distinct session/DB.
+     */
+    cookiePool?: string[];
 };
 export type RequestResult = {
     statusCode: number;

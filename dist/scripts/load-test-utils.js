@@ -79,13 +79,21 @@ async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRe
     const label = endpoint.label ?? endpoint.path;
     // Warm-up phase
     if (warmupRequests > 0) {
-        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(url, method, endpoint.body, endpoint.headers));
+        const warmupHeaders = endpoint.cookiePool && endpoint.cookiePool.length > 0
+            ? { ...endpoint.headers, Cookie: endpoint.cookiePool[0] }
+            : endpoint.headers;
+        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(url, method, endpoint.body, warmupHeaders));
         await Promise.allSettled(warmups);
     }
     // Measurement phase
     const results = [];
     const endTs = performance.now() + durationSec * 1000;
-    const workers = Array.from({ length: concurrency }, () => workerLoop(url, method, endpoint.body, endpoint.headers, endTs, results));
+    const workers = Array.from({ length: concurrency }, (_, i) => {
+        const headers = endpoint.cookiePool && endpoint.cookiePool.length > 0
+            ? { ...endpoint.headers, Cookie: endpoint.cookiePool[i % endpoint.cookiePool.length] }
+            : endpoint.headers;
+        return workerLoop(url, method, endpoint.body, headers, endTs, results);
+    });
     await Promise.allSettled(workers);
     // Calculate metrics
     const latencies = results.map(r => r.latencyMs).sort((a, b) => a - b);
