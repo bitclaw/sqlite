@@ -8,5 +8,5 @@
     "declarationMap": true
   },
   "include": ["src/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "node_modules"]
+  "exclude": ["src/**/*.test.ts", "scripts/**/*.test.ts", "node_modules"]
 }

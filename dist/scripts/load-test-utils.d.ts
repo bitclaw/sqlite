@@ -4,7 +4,7 @@
  *
  * Unlike benchmark.ts (which tests raw SQLite pool.exec() calls), these utilities
  * measure end-to-end HTTP performance through the full stack: HTTP server, middleware,
- * ORM (Prisma), SSR rendering, etc.
+ * the ORM/query layer, SSR rendering, etc.
  *
  * Usage:
  *   Import into app-specific load tests:
@@ -24,6 +24,14 @@ export type LoadTestConfig = {
     durationSec: number;
     /** Optional: warm-up requests before timing */
     warmupRequests?: number;
+    /**
+     * Optional: number of times to repeat each scenario (default 1).
+     * When > 1, each (endpoint, concurrency) runs N times and results are
+     * aggregated — medians for throughput/latency, plus a coefficient of
+     * variation so run-to-run dispersion is visible. Defends against the
+     * ~±30% single-run variance seen on virtualized hosts (e.g. WSL2).
+     */
+    repeat?: number;
 };
 export type EndpointConfig = {
     /** Path relative to baseUrl (e.g., '/healthcheck') */
@@ -63,6 +71,20 @@ export type ScenarioResult = {
     statusCodes: Record<number, number>;
     avgBodySize: number;
     via?: 'cdn' | 'direct';
+    /**
+     * Variance fields — only populated when the scenario was run more than
+     * once (LoadTestConfig.repeat > 1). Absent for single-run scenarios, so
+     * the single-run output shape is unchanged.
+     */
+    runs?: number;
+    /** Lowest per-run throughput (req/s) across the N runs. */
+    throughputMin?: number;
+    /** Highest per-run throughput (req/s) across the N runs. */
+    throughputMax?: number;
+    /** Coefficient of variation of throughput across runs, as a percent. */
+    throughputCoV?: number;
+    /** Median of the per-run p95 values (NOT p95 of pooled latencies). */
+    p95Median?: number;
 };
 export type LoadTestResults = {
     baseUrl: string;

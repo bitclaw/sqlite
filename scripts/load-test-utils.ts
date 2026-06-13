@@ -4,7 +4,7 @@
  *
  * Unlike benchmark.ts (which tests raw SQLite pool.exec() calls), these utilities
  * measure end-to-end HTTP performance through the full stack: HTTP server, middleware,
- * ORM (Prisma), SSR rendering, etc.
+ * the ORM/query layer, SSR rendering, etc.
  *
  * Usage:
  *   Import into app-specific load tests:
@@ -28,6 +28,14 @@ export type LoadTestConfig = {
   durationSec: number;
   /** Optional: warm-up requests before timing */
   warmupRequests?: number;
+  /**
+   * Optional: number of times to repeat each scenario (default 1).
+   * When > 1, each (endpoint, concurrency) runs N times and results are
+   * aggregated — medians for throughput/latency, plus a coefficient of
+   * variation so run-to-run dispersion is visible. Defends against the
+   * ~±30% single-run variance seen on virtualized hosts (e.g. WSL2).
+   */
+  repeat?: number;
 };
 
 export type EndpointConfig = {
@@ -75,6 +83,21 @@ export type ScenarioResult = {
   avgBodySize: number;
 
   via?: 'cdn' | 'direct';
+
+  /**
+   * Variance fields — only populated when the scenario was run more than
+   * once (LoadTestConfig.repeat > 1). Absent for single-run scenarios, so
+   * the single-run output shape is unchanged.
+   */
+  runs?: number;
+  /** Lowest per-run throughput (req/s) across the N runs. */
+  throughputMin?: number;
+  /** Highest per-run throughput (req/s) across the N runs. */
+  throughputMax?: number;
+  /** Coefficient of variation of throughput across runs, as a percent. */
+  throughputCoV?: number;
+  /** Median of the per-run p95 values (NOT p95 of pooled latencies). */
+  p95Median?: number;
 };
 
 export type LoadTestResults = {
@@ -227,6 +250,82 @@ async function runScenario(
 }
 
 /* ------------------------------------------------------------------
+ * Multi-run aggregation
+ * ------------------------------------------------------------------ */
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0
+    ? sorted[mid]!
+    : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+function coefficientOfVariation(values: number[]): number {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  if (mean === 0) return 0;
+  const variance =
+    values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+  return (Math.sqrt(variance) / mean) * 100;
+}
+
+/**
+ * Collapse N per-run ScenarioResults into one. Threshold-checked fields
+ * (throughput, successRate) use the median so a single outlier run does not
+ * flip pass/fail; counts are summed; variance fields expose dispersion.
+ * A single run is returned unchanged (no variance fields → identical shape).
+ */
+function aggregateRuns(runs: ScenarioResult[]): ScenarioResult {
+  if (runs.length === 1) return runs[0]!;
+
+  const first = runs[0]!;
+  const throughputs = runs.map(r => r.throughput);
+
+  const statusCodes: Record<number, number> = {};
+  for (const r of runs) {
+    for (const [code, count] of Object.entries(r.statusCodes)) {
+      statusCodes[Number(code)] = (statusCodes[Number(code)] ?? 0) + count;
+    }
+  }
+
+  const p95Median = median(runs.map(r => r.p95));
+
+  return {
+    endpoint: first.endpoint,
+    label: first.label,
+    method: first.method,
+    concurrency: first.concurrency,
+    durationSec: first.durationSec,
+
+    totalRequests: runs.reduce((s, r) => s + r.totalRequests, 0),
+    successCount: runs.reduce((s, r) => s + r.successCount, 0),
+    failCount: runs.reduce((s, r) => s + r.failCount, 0),
+    successRate: median(runs.map(r => r.successRate)),
+
+    throughput: median(throughputs),
+
+    p50: median(runs.map(r => r.p50)),
+    p95: p95Median,
+    p99: median(runs.map(r => r.p99)),
+    min: Math.min(...runs.map(r => r.min)),
+    max: Math.max(...runs.map(r => r.max)),
+    avg: runs.reduce((s, r) => s + r.avg, 0) / runs.length,
+
+    statusCodes,
+    avgBodySize: runs.reduce((s, r) => s + r.avgBodySize, 0) / runs.length,
+
+    via: first.via,
+
+    runs: runs.length,
+    throughputMin: Math.min(...throughputs),
+    throughputMax: Math.max(...throughputs),
+    throughputCoV: coefficientOfVariation(throughputs),
+    p95Median
+  };
+}
+
+/* ------------------------------------------------------------------
  * Main load test runner
  * ------------------------------------------------------------------ */
 export async function runLoadTest(
@@ -235,19 +334,23 @@ export async function runLoadTest(
   const startedAt = new Date().toISOString();
   const scenarios: ScenarioResult[] = [];
   const warmup = config.warmupRequests ?? 5;
+  const repeat = Math.max(1, config.repeat ?? 1);
 
   for (const endpoint of config.endpoints) {
     for (const concurrency of config.concurrencyLevels) {
-      const _label = endpoint.label ?? endpoint.path;
-
-      const result = await runScenario(
-        config.baseUrl,
-        endpoint,
-        concurrency,
-        config.durationSec,
-        warmup
-      );
-      scenarios.push(result);
+      const runs: ScenarioResult[] = [];
+      for (let i = 0; i < repeat; i++) {
+        runs.push(
+          await runScenario(
+            config.baseUrl,
+            endpoint,
+            concurrency,
+            config.durationSec,
+            warmup
+          )
+        );
+      }
+      scenarios.push(aggregateRuns(runs));
     }
   }
 
@@ -274,8 +377,12 @@ export function formatResults(results: LoadTestResults): string {
   lines.push('='.repeat(100));
   lines.push('');
 
+  // Show the variance column only when at least one scenario was repeated.
+  // Single-run output keeps its original columns unchanged.
+  const showCoV = results.scenarios.some(s => (s.runs ?? 1) > 1);
+
   // Summary table header
-  const header = [
+  const headerCols = [
     'Endpoint'.padEnd(25),
     'Conc'.padStart(5),
     'Req/s'.padStart(8),
@@ -285,13 +392,17 @@ export function formatResults(results: LoadTestResults): string {
     'P99ms'.padStart(8),
     'Success'.padStart(8),
     'AvgBody'.padStart(8)
-  ].join(' | ');
+  ];
+  if (showCoV) {
+    headerCols.push('Runs'.padStart(5), 'CoV%'.padStart(7));
+  }
+  const header = headerCols.join(' | ');
 
   lines.push(header);
   lines.push('-'.repeat(header.length));
 
   for (const s of results.scenarios) {
-    const row = [
+    const cols = [
       s.label.padEnd(25).slice(0, 25),
       String(s.concurrency).padStart(5),
       s.throughput.toFixed(0).padStart(8),
@@ -301,21 +412,36 @@ export function formatResults(results: LoadTestResults): string {
       s.p99.toFixed(1).padStart(8),
       `${s.successRate.toFixed(1)}%`.padStart(8),
       formatBytes(s.avgBodySize).padStart(8)
-    ].join(' | ');
-    lines.push(row);
+    ];
+    if (showCoV) {
+      cols.push(
+        String(s.runs ?? 1).padStart(5),
+        (s.throughputCoV !== undefined
+          ? `±${s.throughputCoV.toFixed(0)}%`
+          : '-'
+        ).padStart(7)
+      );
+    }
+    lines.push(cols.join(' | '));
   }
 
   lines.push('');
 
-  // Pool-level comparison note
+  // Stack-overhead note
   lines.push('-'.repeat(100));
   lines.push(
-    '  NOTE: Pool-level benchmarks (raw pool.exec) show 6,102-13,781 req/s.'
+    '  NOTE: Application-level throughput (full HTTP stack) is lower than raw'
   );
   lines.push(
-    '  Application-level throughput is lower due to HTTP overhead, middleware,'
+    '  pool.exec() benchmarks due to HTTP overhead, middleware, the ORM/query'
   );
-  lines.push('  Prisma ORM, SSR rendering, and serialization.');
+  lines.push('  layer, SSR rendering, and serialization.');
+  if (showCoV) {
+    lines.push(
+      '  CoV% = coefficient of variation of throughput across repeated runs'
+    );
+    lines.push('  (higher = noisier host; treat deltas below CoV% as noise).');
+  }
   lines.push('-'.repeat(100));
   lines.push('');
 
