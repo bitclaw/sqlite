@@ -101,6 +101,30 @@ describe('WriteMutexMap', () => {
     expect(order).toEqual([1, 10, 2, 20]);
   });
 
+  test('isLocked is true while a call is queued or running, false after release', async () => {
+    const map = new WriteMutexMap();
+    let resolveHold: () => void;
+    const hold = new Promise<void>(resolve => {
+      resolveHold = resolve;
+    });
+
+    expect(map.isLocked('key1')).toBe(false);
+
+    const done = map.withLock('key1', async () => {
+      await hold;
+    });
+
+    expect(map.isLocked('key1')).toBe(true);
+    resolveHold!();
+    await done;
+    expect(map.isLocked('key1')).toBe(false);
+  });
+
+  test('isLocked is false for a key with no mutex yet', () => {
+    const map = new WriteMutexMap();
+    expect(map.isLocked('never-used')).toBe(false);
+  });
+
   test('delete removes mutex for key', () => {
     const map = new WriteMutexMap();
 

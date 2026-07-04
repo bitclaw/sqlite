@@ -121,6 +121,41 @@ describe('createTenantDbManager', () => {
       manager.closeAll();
     });
 
+    test('does not evict the LRU connection if it has an in-flight write lock', async () => {
+      // maxConnections: 1, and t1 is the only (therefore always-LRU)
+      // connection - it would normally be evicted the moment a second
+      // tenant is opened. With its write lock held, eviction must pick a
+      // different (unlocked) victim instead - here, the newly-opened t2 -
+      // rather than close t1 out from under its in-flight write.
+      let openCount = 0;
+      const manager = createTenantDbManager({
+        maxConnections: 1,
+        onOpen: (_db, tenantId) => {
+          if (tenantId === 't1') openCount++;
+        }
+      });
+      manager.getDb('t1', makeTenantPath('t1'));
+      expect(openCount).toBe(1);
+
+      let resolveHold: () => void;
+      const hold = new Promise<void>(resolve => {
+        resolveHold = resolve;
+      });
+      const writeDone = manager.withWriteLock('t1', async () => {
+        await hold;
+      });
+
+      manager.getDb('t2', makeTenantPath('t2'));
+      expect(manager.getStats().activeConnections).toBe(1);
+      // t1 must still be the live connection - if it had been evicted and
+      // reopened, onOpen would have fired again.
+      expect(openCount).toBe(1);
+
+      resolveHold!();
+      await writeDone;
+      manager.closeAll();
+    });
+
     test('closes raw DB and rethrows when onOpen throws', () => {
       const manager = createTenantDbManager({
         onOpen: () => {
@@ -190,6 +225,26 @@ describe('createTenantDbManager', () => {
       const manager = createTenantDbManager();
       expect(() => manager.evict('nonexistent')).not.toThrow();
     });
+
+    test('is a no-op while a write lock is in flight for that tenantId', async () => {
+      const manager = createTenantDbManager();
+      manager.getDb('t1', makeTenantPath('t1'));
+
+      let resolveHold: () => void;
+      const hold = new Promise<void>(resolve => {
+        resolveHold = resolve;
+      });
+      const writeDone = manager.withWriteLock('t1', async () => {
+        await hold;
+      });
+
+      manager.evict('t1');
+      expect(manager.getStats().activeConnections).toBe(1);
+
+      resolveHold!();
+      await writeDone;
+      manager.closeAll();
+    });
   });
 
   describe('evictIdle', () => {
@@ -218,6 +273,28 @@ describe('createTenantDbManager', () => {
       await new Promise(r => setTimeout(r, 20));
       const evicted = manager.evictIdle(10);
       expect(evicted).toBe(2);
+    });
+
+    test('does not evict a connection with an in-flight write lock', async () => {
+      const manager = createTenantDbManager();
+      manager.getDb('t1', makeTenantPath('t1'));
+
+      let resolveHold: () => void;
+      const hold = new Promise<void>(resolve => {
+        resolveHold = resolve;
+      });
+      const writeDone = manager.withWriteLock('t1', async () => {
+        await hold;
+      });
+
+      await new Promise(r => setTimeout(r, 20));
+      const evicted = manager.evictIdle(10);
+      expect(evicted).toBe(0);
+      expect(manager.getStats().activeConnections).toBe(1);
+
+      resolveHold!();
+      await writeDone;
+      manager.closeAll();
     });
   });
 

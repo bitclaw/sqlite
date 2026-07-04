@@ -8,12 +8,24 @@
  */
 export class WriteMutex {
   private queue: Promise<void> = Promise.resolve();
+  private active = 0;
+
+  /**
+   * True while at least one caller is queued on or executing inside
+   * acquire(). Callers that close/evict the underlying resource this mutex
+   * guards must check this first - closing out from under a queued-or-running
+   * acquire() defeats the serialization guarantee entirely.
+   */
+  get locked(): boolean {
+    return this.active > 0;
+  }
 
   /**
    * Acquire the mutex, execute the function, then release.
    * Only one function runs at a time per mutex instance.
    */
   async acquire<T>(fn: () => T | Promise<T>): Promise<T> {
+    this.active++;
     let release: () => void;
     const gate = new Promise<void>(resolve => {
       release = resolve;
@@ -23,12 +35,12 @@ export class WriteMutex {
     const prior = this.queue;
     this.queue = gate;
 
-    await prior;
-
     try {
+      await prior;
       return await fn();
     } finally {
       release!();
+      this.active--;
     }
   }
 }
@@ -57,6 +69,14 @@ export class WriteMutexMap {
    */
   delete(key: string): void {
     this.mutexes.delete(key);
+  }
+
+  /**
+   * True if the mutex for this key currently has a caller queued on or
+   * executing inside acquire(). A key with no mutex yet is never locked.
+   */
+  isLocked(key: string): boolean {
+    return this.mutexes.get(key)?.locked ?? false;
   }
 
   /**

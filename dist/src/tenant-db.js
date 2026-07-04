@@ -39,7 +39,15 @@ export const createTenantDbManager = (config) => {
             cleanupIntervalId.unref();
         }
     };
+    // A tenant with an in-flight withWriteLock call must never be evicted:
+    // closing its connection out from under a queued-or-running write breaks
+    // the write mid-statement, and deleting its mutex hands the *next* caller
+    // a brand-new WriteMutex - silently defeating serialization for that
+    // tenant, since two callers now hold logically-independent locks over the
+    // same underlying resource.
     const evict = (tenantId) => {
+        if (writeMutexes.isLocked(tenantId))
+            return;
         const entry = connections.get(tenantId);
         if (entry) {
             try {
@@ -57,6 +65,8 @@ export const createTenantDbManager = (config) => {
         let evicted = 0;
         for (const [id, conn] of connections) {
             if (now - conn.lastAccessed > maxIdleMs) {
+                if (writeMutexes.isLocked(id))
+                    continue;
                 try {
                     conn.db.close();
                 }
@@ -92,9 +102,15 @@ export const createTenantDbManager = (config) => {
         const db = config?.wrapDb ? config.wrapDb(raw, tenantId) : raw;
         connections.set(tenantId, { db, lastAccessed: Date.now() });
         if (connections.size > maxConnections) {
+            // Pick the least-recently-used connection that isn't currently
+            // write-locked - see the comment on evict() for why a locked tenant
+            // must never be closed here. If every over-the-cap connection happens
+            // to be locked, skip eviction this round rather than force-close one.
             let lruId = null;
             let lruAccessed = Number.MAX_SAFE_INTEGER;
             for (const [id, conn] of connections) {
+                if (writeMutexes.isLocked(id))
+                    continue;
                 if (conn.lastAccessed < lruAccessed) {
                     lruAccessed = conn.lastAccessed;
                     lruId = id;
