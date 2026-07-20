@@ -74,25 +74,31 @@ async function workerLoop(url, method, body, headers, endTs, results) {
  * Run a single scenario (one endpoint at one concurrency level)
  * ------------------------------------------------------------------ */
 async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRequests) {
+    const hasPathPool = endpoint.pathPool && endpoint.pathPool.length > 0;
     const url = `${baseUrl}${endpoint.path}`;
+    const urlFor = (path) => `${baseUrl}${path}`;
     const method = endpoint.method ?? 'GET';
     const label = endpoint.label ?? endpoint.path;
     // Warm-up phase
     if (warmupRequests > 0) {
+        const warmupUrl = hasPathPool ? urlFor(endpoint.pathPool[0]) : url;
         const warmupHeaders = endpoint.cookiePool && endpoint.cookiePool.length > 0
             ? { ...endpoint.headers, Cookie: endpoint.cookiePool[0] }
             : endpoint.headers;
-        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(url, method, endpoint.body, warmupHeaders));
+        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(warmupUrl, method, endpoint.body, warmupHeaders));
         await Promise.allSettled(warmups);
     }
     // Measurement phase
     const results = [];
     const endTs = performance.now() + durationSec * 1000;
     const workers = Array.from({ length: concurrency }, (_, i) => {
+        const workerUrl = hasPathPool
+            ? urlFor(endpoint.pathPool[i % endpoint.pathPool.length])
+            : url;
         const headers = endpoint.cookiePool && endpoint.cookiePool.length > 0
             ? { ...endpoint.headers, Cookie: endpoint.cookiePool[i % endpoint.cookiePool.length] }
             : endpoint.headers;
-        return workerLoop(url, method, endpoint.body, headers, endTs, results);
+        return workerLoop(workerUrl, method, endpoint.body, headers, endTs, results);
     });
     await Promise.allSettled(workers);
     // Calculate metrics

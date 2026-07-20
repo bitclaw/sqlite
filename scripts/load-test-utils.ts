@@ -56,6 +56,16 @@ export type EndpointConfig = {
    * should hit a distinct session/DB.
    */
   cookiePool?: string[];
+  /**
+   * Per-worker resolved path pool, parallel to `cookiePool` (same index
+   * pairs the same session's cookie with its own path). When set, each
+   * concurrent worker i requests `pathPool[i % pathPool.length]` instead of
+   * the shared `path`. Use for multi-tenant apps where the authenticated
+   * URL is scoped per-session (e.g. `/workspace/wsp_abc/dashboard`) rather
+   * than a single flat path every session can hit. `path` is still used as
+   * the scenario's label/fallback when `pathPool` is absent or empty.
+   */
+  pathPool?: string[];
 };
 
 export type RequestResult = {
@@ -194,19 +204,22 @@ async function runScenario(
   durationSec: number,
   warmupRequests: number
 ): Promise<ScenarioResult> {
+  const hasPathPool = endpoint.pathPool && endpoint.pathPool.length > 0;
   const url = `${baseUrl}${endpoint.path}`;
+  const urlFor = (path: string) => `${baseUrl}${path}`;
   const method = endpoint.method ?? 'GET';
   const label = endpoint.label ?? endpoint.path;
 
   // Warm-up phase
   if (warmupRequests > 0) {
+    const warmupUrl = hasPathPool ? urlFor(endpoint.pathPool![0]!) : url;
     const warmupHeaders =
       endpoint.cookiePool && endpoint.cookiePool.length > 0
         ? { ...endpoint.headers, Cookie: endpoint.cookiePool[0]! }
         : endpoint.headers;
     const warmups = Array.from(
       { length: Math.min(warmupRequests, concurrency) },
-      () => measureResponseTime(url, method, endpoint.body, warmupHeaders)
+      () => measureResponseTime(warmupUrl, method, endpoint.body, warmupHeaders)
     );
     await Promise.allSettled(warmups);
   }
@@ -216,11 +229,14 @@ async function runScenario(
   const endTs = performance.now() + durationSec * 1000;
 
   const workers = Array.from({ length: concurrency }, (_, i) => {
+    const workerUrl = hasPathPool
+      ? urlFor(endpoint.pathPool![i % endpoint.pathPool!.length]!)
+      : url;
     const headers =
       endpoint.cookiePool && endpoint.cookiePool.length > 0
         ? { ...endpoint.headers, Cookie: endpoint.cookiePool[i % endpoint.cookiePool.length]! }
         : endpoint.headers;
-    return workerLoop(url, method, endpoint.body, headers, endTs, results);
+    return workerLoop(workerUrl, method, endpoint.body, headers, endTs, results);
   });
   await Promise.allSettled(workers);
 

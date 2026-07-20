@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   formatResults,
   type LoadTestResults,
+  runLoadTest,
   type ScenarioResult
 } from './load-test-utils';
 
@@ -52,6 +53,78 @@ describe('formatResults — stack-overhead note', () => {
   test('given any results, when formatted, then note credits the ORM/query layer generically', () => {
     const report = formatResults(makeResults([makeScenario()]));
     expect(report).toContain('ORM/query');
+  });
+});
+
+describe('runLoadTest — pathPool', () => {
+  test('given a pathPool, when concurrency exceeds the pool size, then each worker requests its own path, round-robin', async () => {
+    const requestedPaths: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        requestedPaths.push(new URL(req.url).pathname);
+        return new Response('ok');
+      }
+    });
+
+    try {
+      const results = await runLoadTest({
+        baseUrl: `http://localhost:${server.port}`,
+        endpoints: [
+          {
+            path: '/workspace/{workspaceId}/dashboard',
+            label: 'Dashboard',
+            pathPool: [
+              '/workspace/wsp_a/dashboard',
+              '/workspace/wsp_b/dashboard',
+              '/workspace/wsp_c/dashboard'
+            ]
+          }
+        ],
+        concurrencyLevels: [5],
+        durationSec: 1,
+        warmupRequests: 0
+      });
+
+      expect(results.scenarios[0]?.successRate).toBe(100);
+      const uniquePaths = new Set(requestedPaths);
+      expect(uniquePaths).toEqual(
+        new Set([
+          '/workspace/wsp_a/dashboard',
+          '/workspace/wsp_b/dashboard',
+          '/workspace/wsp_c/dashboard'
+        ])
+      );
+      // Never the literal template path - pathPool must fully override it.
+      expect(requestedPaths).not.toContain('/workspace/{workspaceId}/dashboard');
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('given no pathPool, when run, then the literal path is used for every request (unchanged behavior)', async () => {
+    const requestedPaths: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        requestedPaths.push(new URL(req.url).pathname);
+        return new Response('ok');
+      }
+    });
+
+    try {
+      await runLoadTest({
+        baseUrl: `http://localhost:${server.port}`,
+        endpoints: [{ path: '/dashboard', label: 'Dashboard' }],
+        concurrencyLevels: [3],
+        durationSec: 1,
+        warmupRequests: 0
+      });
+
+      expect(new Set(requestedPaths)).toEqual(new Set(['/dashboard']));
+    } finally {
+      server.stop();
+    }
   });
 });
 

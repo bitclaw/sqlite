@@ -51,6 +51,16 @@ export type EndpointConfig = {
      * should hit a distinct session/DB.
      */
     cookiePool?: string[];
+    /**
+     * Per-worker resolved path pool, parallel to `cookiePool` (same index
+     * pairs the same session's cookie with its own path). When set, each
+     * concurrent worker i requests `pathPool[i % pathPool.length]` instead of
+     * the shared `path`. Use for multi-tenant apps where the authenticated
+     * URL is scoped per-session (e.g. `/workspace/wsp_abc/dashboard`) rather
+     * than a single flat path every session can hit. `path` is still used as
+     * the scenario's label/fallback when `pathPool` is absent or empty.
+     */
+    pathPool?: string[];
 };
 export type RequestResult = {
     statusCode: number;
