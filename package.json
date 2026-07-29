@@ -58,6 +58,10 @@
       "types": "./dist/src/statement-cache.d.ts",
       "default": "./dist/src/statement-cache.js"
     },
+    "./wal-mode": {
+      "types": "./dist/src/wal-mode.d.ts",
+      "default": "./dist/src/wal-mode.js"
+    },
     "./load-test-utils": {
       "types": "./dist/scripts/load-test-utils.d.ts",
       "default": "./dist/scripts/load-test-utils.js"
