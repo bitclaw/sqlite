@@ -4,6 +4,7 @@
 import { Database } from 'bun:sqlite';
 import { parentPort, workerData } from 'node:worker_threads';
 import { StatementCache } from './statement-cache';
+import { setWalModeWithRetry } from './wal-mode';
 const isDevelopment = process.env.NODE_ENV === 'development';
 const isTest = process.env.NODE_ENV === 'test';
 const stmtCache = new StatementCache();
@@ -70,8 +71,10 @@ export class SQLiteWorker {
                 readonly: false
             });
             if (this.config.path !== ':memory:') {
-                this.db.run('PRAGMA journal_mode = WAL');
+                // busy_timeout first: correct for ordinary statement contention (see
+                // wal-mode.ts for why the WAL switch itself needs its own retry).
                 this.db.run('PRAGMA busy_timeout = 10000');
+                setWalModeWithRetry(this.db);
             }
             this.db.run('PRAGMA foreign_keys = ON');
             this.db.run('PRAGMA synchronous = NORMAL');
