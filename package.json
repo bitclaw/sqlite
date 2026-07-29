@@ -1,6 +1,6 @@
 {
   "name": "@bitclaw/sqlite",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "High-performance SQLite worker pool and utilities using bun:sqlite",
   "files": [
     "dist",
