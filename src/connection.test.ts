@@ -61,6 +61,68 @@ describe('initializeConnection', () => {
   });
 });
 
+describe('concurrent open under lock contention', () => {
+  // Regression test for a production crash. Two bugs stacked:
+  //
+  // 1. journal_mode=WAL was being set before busy_timeout (fixed: order
+  //    swapped).
+  // 2. Separately, and more subtly: SQLite's busy_timeout does NOT cover
+  //    `PRAGMA journal_mode = WAL` itself on a connection's FIRST-EVER
+  //    switch from the default rollback-journal mode - that switch needs a
+  //    brief exclusive lock and fails instantly with SQLITE_BUSY regardless
+  //    of busy_timeout, confirmed empirically against a real second OS
+  //    process (in-process two-Database-handle tests gave a false pass here:
+  //    re-applying journal_mode=WAL on a file already in WAL mode is a safe
+  //    no-op regardless of contention, which only exercises the safe path).
+  //    Fixed via setWalModeWithRetry's manual retry loop (wal-mode.ts).
+  //
+  // This test spawns a real child process to hold the write lock, because
+  // the retry loop uses Bun.sleepSync (blocks the thread) - a same-process,
+  // same-thread "holder" scheduled via setTimeout would never get a chance
+  // to run its release while the retry loop blocks the event loop, giving a
+  // false failure unrelated to the actual fix.
+  test('given a fresh file exclusively locked by another process, when a second connection switches it to WAL for the first time, then it waits for the lock instead of throwing', async () => {
+    const tmpPath = `/tmp/connection-contention-test-${Date.now()}.db`;
+    const holderScript = `
+      import { Database } from 'bun:sqlite';
+      const db = new Database(${JSON.stringify(tmpPath)}, { create: true });
+      db.run('CREATE TABLE t (id INTEGER PRIMARY KEY)');
+      db.run('BEGIN IMMEDIATE');
+      db.run('INSERT INTO t (id) VALUES (1)');
+      await Bun.sleep(300);
+      db.run('COMMIT');
+    `;
+    const holder = Bun.spawn(['bun', '-e', holderScript], {
+      stdout: 'inherit',
+      stderr: 'inherit'
+    });
+
+    // Give the holder a moment to acquire its lock before we try to open.
+    await Bun.sleep(80);
+
+    const t0 = Date.now();
+    let second: Database | undefined;
+    expect(() => {
+      second = initializeConnection({ path: tmpPath });
+    }).not.toThrow();
+    // Proves this actually waited on the lock rather than getting lucky with
+    // an already-released file: must take at least as long as the holder's
+    // remaining hold time, not resolve instantly.
+    expect(Date.now() - t0).toBeGreaterThan(100);
+
+    await holder.exited;
+    second?.close();
+
+    try {
+      require('node:fs').unlinkSync(tmpPath);
+      require('node:fs').unlinkSync(`${tmpPath}-wal`);
+      require('node:fs').unlinkSync(`${tmpPath}-shm`);
+    } catch {
+      // ignore
+    }
+  });
+});
+
 describe('PRAGMA allow-list', () => {
   let db: Database;
 

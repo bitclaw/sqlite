@@ -2,6 +2,7 @@
 // Database connection initialization and configuration
 // Uses bun:sqlite for 3-6x faster reads compared to better-sqlite3
 import { Database } from 'bun:sqlite';
+import { setWalModeWithRetry } from './wal-mode';
 
 export type ConnectionConfig = {
   path: string;
@@ -20,8 +21,10 @@ export function initializeConnection(config: ConnectionConfig): Database {
 
   // Apply optimal PRAGMA settings
   if (config.path !== ':memory:') {
-    db.run('PRAGMA journal_mode = WAL');
+    // busy_timeout first: correct for ordinary statement contention (see
+    // wal-mode.ts for why the WAL switch itself needs its own retry).
     db.run('PRAGMA busy_timeout = 10000');
+    setWalModeWithRetry(db);
   }
 
   db.run('PRAGMA foreign_keys = ON');

@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { setWalModeWithRetry } from './wal-mode';
 import { WriteMutexMap } from './write-mutex';
 
 export type TenantDbConfig = {
@@ -27,8 +28,10 @@ type TenantConnection = {
 
 const applyPragmas = (db: Database, dbPath: string): void => {
   if (dbPath !== ':memory:') {
-    db.run('PRAGMA journal_mode = WAL');
+    // busy_timeout first: correct for ordinary statement contention (see
+    // wal-mode.ts for why the WAL switch itself needs its own retry).
     db.run('PRAGMA busy_timeout = 10000');
+    setWalModeWithRetry(db);
   }
   db.run('PRAGMA synchronous = NORMAL');
   db.run('PRAGMA cache_size = -20000'); // 20MB
