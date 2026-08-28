@@ -23,7 +23,13 @@ High-performance SQLite optimization package for multi-app SaaS deployments.
 | `@bitclaw/sqlite/retry` | Exponential backoff retry for SQLITE_BUSY errors |
 | `@bitclaw/sqlite/prisma-immediate-tx` | BEGIN IMMEDIATE wrapper for Prisma transactions |
 | `@bitclaw/sqlite/query-logger` | Dev-mode SQL logging for bun:sqlite (mirrors Prisma's `prisma:query`) |
-| `@bitclaw/sqlite/ttl-cache` | In-memory TTL cache for server-side deduplication across HTTP requests |
+
+> **Migrating from 1.x?** `ttl-cache` moved to
+> [`@bitclaw/server-kit`](https://www.npmjs.com/package/@bitclaw/server-kit)
+> as of 2.0.0 , it had no SQLite coupling and didn't belong in this package.
+> Update `import { TTLCache } from '@bitclaw/sqlite/ttl-cache'` to
+> `import { TTLCache } from '@bitclaw/server-kit/ttl-cache'` (same API,
+> `npm install @bitclaw/server-kit`).
 
 ## Performance
 
@@ -171,30 +177,6 @@ const db = wrapWithQueryLogging(raw, { label: 'ws:abc123' });
 db.query('SELECT * FROM servers WHERE id = ?').get(serverId);
 ```
 
-### TTL Cache
-
-In-memory TTL cache for server-side deduplication across HTTP requests. Designed for caching expensive lookups (auth sessions, membership checks, bootstrap data) that repeat when frameworks like TanStack Router re-run loaders on client hydration.
-
-```typescript
-import { TTLCache } from '@bitclaw/sqlite/ttl-cache';
-
-type BootstrapData = { user: User; workspaces: Workspace[] };
-
-const bootstrapCache = new TTLCache<BootstrapData>({
-  ttl: 30_000,   // 30s (default)
-  maxSize: 100   // auto-prune expired entries when exceeded (default)
-});
-
-// In your server function:
-const cached = bootstrapCache.get(sessionId);
-if (cached) return cached;
-
-const data = await expensiveQuery();
-bootstrapCache.set(sessionId, data);
-return data;
-```
-
-Unlike `WeakMap` per-request caching (which deduplicates within a single SSR request), `TTLCache` deduplicates **across** HTTP requests - e.g. when TanStack Router replays `beforeLoad` on client hydration, the server returns the cached result instantly (0 DB queries).
 
 ## Configuration
 

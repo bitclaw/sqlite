@@ -1,6 +1,6 @@
 {
   "name": "@bitclaw/sqlite",
-  "version": "1.5.2",
+  "version": "2.0.0",
   "description": "High-performance SQLite worker pool and utilities using bun:sqlite",
   "files": [
     "dist",
@@ -41,10 +41,6 @@
     "./query-logger": {
       "types": "./dist/src/query-logger.d.ts",
       "default": "./dist/src/query-logger.js"
-    },
-    "./ttl-cache": {
-      "types": "./dist/src/ttl-cache.d.ts",
-      "default": "./dist/src/ttl-cache.js"
     },
     "./cache-lock": {
       "types": "./dist/src/cache-lock.d.ts",
@@ -88,8 +84,7 @@
     "sqlite",
     "bun",
     "worker-pool",
-    "json-cache",
-    "ttl-cache"
+    "json-cache"
   ],
   "author": "bitclaw",
   "license": "MIT",
