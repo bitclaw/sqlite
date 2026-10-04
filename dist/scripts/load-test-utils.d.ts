@@ -32,6 +32,13 @@ export type LoadTestConfig = {
      * ~±30% single-run variance seen on virtualized hosts (e.g. WSL2).
      */
     repeat?: number;
+    /**
+     * Optional: stops the test when aborted. Workers stop issuing requests,
+     * in-flight requests are cancelled, and runLoadTest rejects with
+     * `signal.reason`. Use it to bound a run that must not outlive its
+     * caller (a job timeout, a lost lease, Ctrl-C).
+     */
+    signal?: AbortSignal;
 };
 export type EndpointConfig = {
     /** Path relative to baseUrl (e.g., '/healthcheck') */
@@ -110,7 +117,7 @@ export type LoadTestResults = {
     scenarios: ScenarioResult[];
 };
 export declare function percentile(sorted: number[], p: number): number;
-export declare function measureResponseTime(url: string, method?: string, body?: string, headers?: Record<string, string>): Promise<RequestResult>;
+export declare function measureResponseTime(url: string, method?: string, body?: string, headers?: Record<string, string>, signal?: AbortSignal): Promise<RequestResult>;
 export declare function runLoadTest(config: LoadTestConfig): Promise<LoadTestResults>;
 export declare function formatResults(results: LoadTestResults): string;
 //# sourceMappingURL=load-test-utils.d.ts.map

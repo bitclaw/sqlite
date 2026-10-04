@@ -31,11 +31,12 @@ export function percentile(sorted, p) {
 /* ------------------------------------------------------------------
  * Single request measurement
  * ------------------------------------------------------------------ */
-export async function measureResponseTime(url, method = 'GET', body, headers) {
+export async function measureResponseTime(url, method = 'GET', body, headers, signal) {
     const start = performance.now();
     try {
         const response = await fetch(url, {
             method,
+            signal,
             body: method !== 'GET' ? body : undefined,
             headers: {
                 Accept: 'text/html,application/json',
@@ -64,16 +65,18 @@ export async function measureResponseTime(url, method = 'GET', body, headers) {
 /* ------------------------------------------------------------------
  * Worker loop for sustained load
  * ------------------------------------------------------------------ */
-async function workerLoop(url, method, body, headers, endTs, results) {
-    while (performance.now() < endTs) {
-        const result = await measureResponseTime(url, method, body, headers);
+async function workerLoop(url, method, body, headers, endTs, results, signal) {
+    while (performance.now() < endTs && !signal?.aborted) {
+        const result = await measureResponseTime(url, method, body, headers, signal);
+        if (signal?.aborted)
+            return;
         results.push(result);
     }
 }
 /* ------------------------------------------------------------------
  * Run a single scenario (one endpoint at one concurrency level)
  * ------------------------------------------------------------------ */
-async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRequests) {
+async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRequests, signal) {
     const hasPathPool = endpoint.pathPool && endpoint.pathPool.length > 0;
     const url = `${baseUrl}${endpoint.path}`;
     const urlFor = (path) => `${baseUrl}${path}`;
@@ -85,7 +88,7 @@ async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRe
         const warmupHeaders = endpoint.cookiePool && endpoint.cookiePool.length > 0
             ? { ...endpoint.headers, Cookie: endpoint.cookiePool[0] }
             : endpoint.headers;
-        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(warmupUrl, method, endpoint.body, warmupHeaders));
+        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(warmupUrl, method, endpoint.body, warmupHeaders, signal));
         await Promise.allSettled(warmups);
     }
     // Measurement phase
@@ -98,7 +101,7 @@ async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRe
         const headers = endpoint.cookiePool && endpoint.cookiePool.length > 0
             ? { ...endpoint.headers, Cookie: endpoint.cookiePool[i % endpoint.cookiePool.length] }
             : endpoint.headers;
-        return workerLoop(workerUrl, method, endpoint.body, headers, endTs, results);
+        return workerLoop(workerUrl, method, endpoint.body, headers, endTs, results, signal);
     });
     await Promise.allSettled(workers);
     // Calculate metrics
@@ -211,11 +214,13 @@ export async function runLoadTest(config) {
         for (const concurrency of config.concurrencyLevels) {
             const runs = [];
             for (let i = 0; i < repeat; i++) {
-                runs.push(await runScenario(config.baseUrl, endpoint, concurrency, config.durationSec, warmup));
+                config.signal?.throwIfAborted();
+                runs.push(await runScenario(config.baseUrl, endpoint, concurrency, config.durationSec, warmup, config.signal));
             }
             scenarios.push(aggregateRuns(runs));
         }
     }
+    config.signal?.throwIfAborted();
     return {
         baseUrl: config.baseUrl,
         startedAt,
