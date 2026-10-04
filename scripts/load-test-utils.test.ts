@@ -146,3 +146,68 @@ describe('formatResults — variance (CoV) column', () => {
     expect(report).toContain('coefficient of variation');
   });
 });
+
+describe('runLoadTest — signal', () => {
+  test('given a signal aborted mid-scenario, when running, then requests stop and it rejects with the reason', async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests++;
+        return new Response('ok');
+      }
+    });
+
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error('job timed out')), 200);
+      const started = performance.now();
+
+      await expect(
+        runLoadTest({
+          baseUrl: `http://localhost:${server.port}`,
+          endpoints: [{ path: '/a' }, { path: '/b' }],
+          concurrencyLevels: [3, 6],
+          durationSec: 5,
+          warmupRequests: 0,
+          signal: controller.signal
+        })
+      ).rejects.toThrow('job timed out');
+
+      // Four 5s scenarios without the signal; aborted at 200ms.
+      expect(performance.now() - started).toBeLessThan(1500);
+      const afterAbort = requests;
+      await Bun.sleep(200);
+      expect(requests).toBe(afterAbort);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('given an already aborted signal, when running, then no request is sent', async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests++;
+        return new Response('ok');
+      }
+    });
+
+    try {
+      await expect(
+        runLoadTest({
+          baseUrl: `http://localhost:${server.port}`,
+          endpoints: [{ path: '/a' }],
+          concurrencyLevels: [2],
+          durationSec: 1,
+          warmupRequests: 2,
+          signal: AbortSignal.abort()
+        })
+      ).rejects.toThrow();
+      expect(requests).toBe(0);
+    } finally {
+      server.stop();
+    }
+  });
+});

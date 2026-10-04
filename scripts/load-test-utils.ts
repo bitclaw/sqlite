@@ -36,6 +36,13 @@ export type LoadTestConfig = {
    * ~±30% single-run variance seen on virtualized hosts (e.g. WSL2).
    */
   repeat?: number;
+  /**
+   * Optional: stops the test when aborted. Workers stop issuing requests,
+   * in-flight requests are cancelled, and runLoadTest rejects with
+   * `signal.reason`. Use it to bound a run that must not outlive its
+   * caller (a job timeout, a lost lease, Ctrl-C).
+   */
+  signal?: AbortSignal;
 };
 
 export type EndpointConfig = {
@@ -145,12 +152,14 @@ export async function measureResponseTime(
   url: string,
   method = 'GET',
   body?: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  signal?: AbortSignal
 ): Promise<RequestResult> {
   const start = performance.now();
   try {
     const response = await fetch(url, {
       method,
+      signal,
       body: method !== 'GET' ? body : undefined,
       headers: {
         Accept: 'text/html,application/json',
@@ -186,10 +195,12 @@ async function workerLoop(
   body: string | undefined,
   headers: Record<string, string> | undefined,
   endTs: number,
-  results: RequestResult[]
+  results: RequestResult[],
+  signal?: AbortSignal
 ): Promise<void> {
-  while (performance.now() < endTs) {
-    const result = await measureResponseTime(url, method, body, headers);
+  while (performance.now() < endTs && !signal?.aborted) {
+    const result = await measureResponseTime(url, method, body, headers, signal);
+    if (signal?.aborted) return;
     results.push(result);
   }
 }
@@ -202,7 +213,8 @@ async function runScenario(
   endpoint: EndpointConfig,
   concurrency: number,
   durationSec: number,
-  warmupRequests: number
+  warmupRequests: number,
+  signal?: AbortSignal
 ): Promise<ScenarioResult> {
   const hasPathPool = endpoint.pathPool && endpoint.pathPool.length > 0;
   const url = `${baseUrl}${endpoint.path}`;
@@ -219,7 +231,14 @@ async function runScenario(
         : endpoint.headers;
     const warmups = Array.from(
       { length: Math.min(warmupRequests, concurrency) },
-      () => measureResponseTime(warmupUrl, method, endpoint.body, warmupHeaders)
+      () =>
+        measureResponseTime(
+          warmupUrl,
+          method,
+          endpoint.body,
+          warmupHeaders,
+          signal
+        )
     );
     await Promise.allSettled(warmups);
   }
@@ -236,7 +255,15 @@ async function runScenario(
       endpoint.cookiePool && endpoint.cookiePool.length > 0
         ? { ...endpoint.headers, Cookie: endpoint.cookiePool[i % endpoint.cookiePool.length]! }
         : endpoint.headers;
-    return workerLoop(workerUrl, method, endpoint.body, headers, endTs, results);
+    return workerLoop(
+      workerUrl,
+      method,
+      endpoint.body,
+      headers,
+      endTs,
+      results,
+      signal
+    );
   });
   await Promise.allSettled(workers);
 
@@ -371,19 +398,22 @@ export async function runLoadTest(
     for (const concurrency of config.concurrencyLevels) {
       const runs: ScenarioResult[] = [];
       for (let i = 0; i < repeat; i++) {
+        config.signal?.throwIfAborted();
         runs.push(
           await runScenario(
             config.baseUrl,
             endpoint,
             concurrency,
             config.durationSec,
-            warmup
+            warmup,
+            config.signal
           )
         );
       }
       scenarios.push(aggregateRuns(runs));
     }
   }
+  config.signal?.throwIfAborted();
 
   return {
     baseUrl: config.baseUrl,
