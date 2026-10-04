@@ -176,6 +176,8 @@ describe('runLoadTest — signal', () => {
 
       // Four 5s scenarios without the signal; aborted at 200ms.
       expect(performance.now() - started).toBeLessThan(1500);
+      // A request already on the socket when abort fired can still land.
+      await Bun.sleep(50);
       const afterAbort = requests;
       await Bun.sleep(200);
       expect(requests).toBe(afterAbort);
