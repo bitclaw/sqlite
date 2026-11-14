@@ -298,6 +298,85 @@ describe('createTenantDbManager', () => {
     });
   });
 
+  describe('maintain', () => {
+    // Records which tenants were optimized, in order.
+    const tracked = () => {
+      const optimized: string[] = [];
+      const manager = createTenantDbManager({
+        maintenanceBatch: 2,
+        onOpen: (db, tenantId) => {
+          const run = db.run.bind(db);
+          db.run = ((sql: string, ...rest: []) => {
+            if (sql === 'PRAGMA optimize') optimized.push(tenantId);
+            return run(sql, ...rest);
+          }) as typeof db.run;
+        }
+      });
+      return { manager, optimized };
+    };
+
+    test('does a bounded batch per call, not every open connection', () => {
+      const { manager, optimized } = tracked();
+      for (const id of ['t1', 't2', 't3', 't4', 't5']) {
+        manager.getDb(id, makeTenantPath(id));
+      }
+      expect(manager.maintain()).toBe(2);
+      expect(optimized.length).toBe(2);
+      manager.closeAll();
+    });
+
+    test('rotates: least recently maintained first, so every connection gets a turn', async () => {
+      const { manager, optimized } = tracked();
+      for (const id of ['t1', 't2', 't3', 't4', 't5']) {
+        manager.getDb(id, makeTenantPath(id));
+        await Bun.sleep(2);
+      }
+      manager.maintain();
+      await Bun.sleep(2);
+      manager.maintain();
+      await Bun.sleep(2);
+      manager.maintain();
+      expect(optimized.slice(0, 5).sort()).toEqual([
+        't1',
+        't2',
+        't3',
+        't4',
+        't5'
+      ]);
+      // The sixth turn goes back to the one maintained longest ago.
+      expect(optimized[5]).toBe(optimized[0] as string);
+      manager.closeAll();
+    });
+
+    test('takes an explicit limit, and returns how many it did', () => {
+      const { manager, optimized } = tracked();
+      for (const id of ['t1', 't2', 't3']) {
+        manager.getDb(id, makeTenantPath(id));
+      }
+      expect(manager.maintain(10)).toBe(3);
+      expect(manager.maintain(0)).toBe(0);
+      expect(optimized.length).toBe(3);
+      manager.closeAll();
+    });
+
+    test('leaves a connection with a write in flight for a later call', async () => {
+      const { manager, optimized } = tracked();
+      manager.getDb('t1', makeTenantPath('t1'));
+      let release: () => void = () => {};
+      const held = manager.withWriteLock(
+        't1',
+        () => new Promise<void>(resolve => (release = resolve))
+      );
+      await Bun.sleep(5);
+      expect(manager.maintain()).toBe(0);
+      release();
+      await held;
+      expect(manager.maintain()).toBe(1);
+      expect(optimized).toEqual(['t1']);
+      manager.closeAll();
+    });
+  });
+
   describe('closeAll', () => {
     test('closes all connections and clears cache', () => {
       const manager = createTenantDbManager();

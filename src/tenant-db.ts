@@ -8,6 +8,13 @@ export type TenantDbConfig = {
   maxConnections?: number;
   idleTimeoutMs?: number;
   cleanupIntervalMs?: number;
+  /**
+   * How many open connections one cleanup tick checkpoints and optimizes
+   * (default 20), least recently maintained first. The tick used to do every
+   * open connection in one synchronous loop: with a few hundred tenant DBs
+   * open that blocked the event loop for seconds, once a minute.
+   */
+  maintenanceBatch?: number;
   onOpen?: (db: Database, tenantId: string) => void;
   wrapDb?: (raw: Database, tenantId: string) => Database;
 };
@@ -17,6 +24,13 @@ export type TenantDbManager = {
   withWriteLock: <T>(tenantId: string, fn: () => T | Promise<T>) => Promise<T>;
   evict: (tenantId: string) => void;
   evictIdle: (maxIdleMs?: number) => number;
+  /**
+   * Checkpoint and optimize up to `limit` connections (default:
+   * maintenanceBatch), least recently maintained first. Returns how many it
+   * did. The cleanup tick calls this; exposed for callers that schedule
+   * their own maintenance.
+   */
+  maintain: (limit?: number) => number;
   closeAll: () => void;
   getStats: () => { activeConnections: number; oldestAccess: number | null };
 };
@@ -24,6 +38,7 @@ export type TenantDbManager = {
 type TenantConnection = {
   db: Database;
   lastAccessed: number;
+  lastMaintained: number;
 };
 
 const applyPragmas = (db: Database, dbPath: string): void => {
@@ -46,6 +61,7 @@ export const createTenantDbManager = (
   const maxConnections = config?.maxConnections ?? 200;
   const idleTimeoutMs = config?.idleTimeoutMs ?? 300_000;
   const cleanupIntervalMs = config?.cleanupIntervalMs ?? 60_000;
+  const maintenanceBatch = config?.maintenanceBatch ?? 20;
 
   const connections = new Map<string, TenantConnection>();
   const writeMutexes = new WriteMutexMap();
@@ -55,18 +71,32 @@ export const createTenantDbManager = (
     if (cleanupIntervalId) return;
     cleanupIntervalId = setInterval(() => {
       evictIdle();
-      for (const conn of connections.values()) {
-        try {
-          conn.db.run('PRAGMA wal_checkpoint(PASSIVE)');
-          conn.db.run('PRAGMA optimize');
-        } catch {
-          // Non-critical
-        }
-      }
+      maintain();
     }, cleanupIntervalMs);
     if (cleanupIntervalId.unref) {
       cleanupIntervalId.unref();
     }
+  };
+
+  // A bounded slice per call, so the event loop is never held for long:
+  // SQLite's own autocheckpoint keeps each WAL in check between visits, and
+  // close() checkpoints too. A connection with a write in flight is left
+  // for a later call.
+  const maintain = (limit: number = maintenanceBatch): number => {
+    const due = [...connections.entries()]
+      .filter(([id]) => !writeMutexes.isLocked(id))
+      .sort((a, b) => a[1].lastMaintained - b[1].lastMaintained)
+      .slice(0, Math.max(0, limit));
+    for (const [, conn] of due) {
+      try {
+        conn.db.run('PRAGMA wal_checkpoint(PASSIVE)');
+        conn.db.run('PRAGMA optimize');
+      } catch {
+        // Non-critical
+      }
+      conn.lastMaintained = Date.now();
+    }
+    return due.length;
   };
 
   // A tenant with an in-flight withWriteLock call must never be evicted:
@@ -132,7 +162,12 @@ export const createTenantDbManager = (
 
     const db = config?.wrapDb ? config.wrapDb(raw, tenantId) : raw;
 
-    connections.set(tenantId, { db, lastAccessed: Date.now() });
+    const openedAt = Date.now();
+    connections.set(tenantId, {
+      db,
+      lastAccessed: openedAt,
+      lastMaintained: openedAt
+    });
 
     if (connections.size > maxConnections) {
       // Pick the least-recently-used connection that isn't currently
@@ -196,5 +231,13 @@ export const createTenantDbManager = (
     return { activeConnections: connections.size, oldestAccess };
   };
 
-  return { getDb, withWriteLock, evict, evictIdle, closeAll, getStats };
+  return {
+    getDb,
+    withWriteLock,
+    evict,
+    evictIdle,
+    maintain,
+    closeAll,
+    getStats
+  };
 };
