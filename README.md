@@ -2,6 +2,9 @@
 
 High-performance SQLite optimization package for multi-app SaaS deployments.
 
+> Part of [Warpkit](https://warpkit.dev/?utm_source=github&utm_medium=readme), my TypeScript SaaS starter.
+> I'm open for consulting on this kind of work: [bitclaw.com/hire](https://bitclaw.com/hire?utm_source=github&utm_medium=readme).
+
 ## Features
 
 - **Worker Thread Pool**: Multiple SQLite connections for concurrent read/write operations
