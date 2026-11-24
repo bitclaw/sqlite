@@ -68,7 +68,21 @@ export type EndpointConfig = {
      * the scenario's label/fallback when `pathPool` is absent or empty.
      */
     pathPool?: string[];
+    /**
+     * Count a 3xx as a failure and do not follow it. For an authenticated
+     * page a redirect means the session was refused, usually to a login page
+     * that answers 200 and would otherwise read as a success.
+     */
+    failOnRedirect?: boolean;
+    /**
+     * Text the response body must contain to count as a success: something
+     * only the real page renders, so an error or rate-limit page that answers
+     * 200 fails instead.
+     */
+    mustInclude?: string;
 };
+/** The per-endpoint checks measureResponseTime applies to each response. */
+export type ResponseCheck = Pick<EndpointConfig, 'failOnRedirect' | 'mustInclude'>;
 export type RequestResult = {
     statusCode: number;
     latencyMs: number;
@@ -117,7 +131,7 @@ export type LoadTestResults = {
     scenarios: ScenarioResult[];
 };
 export declare function percentile(sorted: number[], p: number): number;
-export declare function measureResponseTime(url: string, method?: string, body?: string, headers?: Record<string, string>, signal?: AbortSignal): Promise<RequestResult>;
+export declare function measureResponseTime(url: string, method?: string, body?: string, headers?: Record<string, string>, signal?: AbortSignal, check?: ResponseCheck): Promise<RequestResult>;
 export declare function runLoadTest(config: LoadTestConfig): Promise<LoadTestResults>;
 export declare function formatResults(results: LoadTestResults): string;
 //# sourceMappingURL=load-test-utils.d.ts.map

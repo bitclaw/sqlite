@@ -31,12 +31,13 @@ export function percentile(sorted, p) {
 /* ------------------------------------------------------------------
  * Single request measurement
  * ------------------------------------------------------------------ */
-export async function measureResponseTime(url, method = 'GET', body, headers, signal) {
+export async function measureResponseTime(url, method = 'GET', body, headers, signal, check = {}) {
     const start = performance.now();
     try {
         const response = await fetch(url, {
             method,
             signal,
+            redirect: check.failOnRedirect ? 'manual' : 'follow',
             body: method !== 'GET' ? body : undefined,
             headers: {
                 Accept: 'text/html,application/json',
@@ -49,7 +50,10 @@ export async function measureResponseTime(url, method = 'GET', body, headers, si
         return {
             statusCode: response.status,
             latencyMs,
-            success: response.status >= 200 && response.status < 400,
+            success: response.status >= 200 &&
+                response.status < (check.failOnRedirect ? 300 : 400) &&
+                (check.mustInclude === undefined ||
+                    responseBody.includes(check.mustInclude)),
             bodySize: responseBody.length
         };
     }
@@ -65,9 +69,9 @@ export async function measureResponseTime(url, method = 'GET', body, headers, si
 /* ------------------------------------------------------------------
  * Worker loop for sustained load
  * ------------------------------------------------------------------ */
-async function workerLoop(url, method, body, headers, endTs, results, signal) {
+async function workerLoop(url, method, body, headers, endTs, results, signal, check = {}) {
     while (performance.now() < endTs && !signal?.aborted) {
-        const result = await measureResponseTime(url, method, body, headers, signal);
+        const result = await measureResponseTime(url, method, body, headers, signal, check);
         if (signal?.aborted)
             return;
         results.push(result);
@@ -82,13 +86,17 @@ async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRe
     const urlFor = (path) => `${baseUrl}${path}`;
     const method = endpoint.method ?? 'GET';
     const label = endpoint.label ?? endpoint.path;
+    const check = {
+        failOnRedirect: endpoint.failOnRedirect,
+        mustInclude: endpoint.mustInclude
+    };
     // Warm-up phase
     if (warmupRequests > 0) {
         const warmupUrl = hasPathPool ? urlFor(endpoint.pathPool[0]) : url;
         const warmupHeaders = endpoint.cookiePool && endpoint.cookiePool.length > 0
             ? { ...endpoint.headers, Cookie: endpoint.cookiePool[0] }
             : endpoint.headers;
-        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(warmupUrl, method, endpoint.body, warmupHeaders, signal));
+        const warmups = Array.from({ length: Math.min(warmupRequests, concurrency) }, () => measureResponseTime(warmupUrl, method, endpoint.body, warmupHeaders, signal, check));
         await Promise.allSettled(warmups);
     }
     // Measurement phase
@@ -101,7 +109,7 @@ async function runScenario(baseUrl, endpoint, concurrency, durationSec, warmupRe
         const headers = endpoint.cookiePool && endpoint.cookiePool.length > 0
             ? { ...endpoint.headers, Cookie: endpoint.cookiePool[i % endpoint.cookiePool.length] }
             : endpoint.headers;
-        return workerLoop(workerUrl, method, endpoint.body, headers, endTs, results, signal);
+        return workerLoop(workerUrl, method, endpoint.body, headers, endTs, results, signal, check);
     });
     await Promise.allSettled(workers);
     // Calculate metrics

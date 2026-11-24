@@ -1,6 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import {
   formatResults,
+  measureResponseTime,
   type LoadTestResults,
   runLoadTest,
   type ScenarioResult
@@ -211,5 +212,42 @@ describe('runLoadTest — signal', () => {
     } finally {
       server.stop();
     }
+  });
+});
+
+describe('measureResponseTime checks', () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const path = new URL(req.url).pathname;
+      if (path === '/private') return Response.redirect('/login', 307);
+      if (path === '/login') return new Response('<h1>Sign in</h1>');
+      if (path === '/limited') return new Response('<p>Too many requests</p>');
+      return new Response('<h1>Analytics</h1>');
+    }
+  });
+  const base = `http://127.0.0.1:${server.port}`;
+  afterAll(() => server.stop(true));
+
+  test('a followed redirect to a 200 page counts as success by default', async () => {
+    const r = await measureResponseTime(`${base}/private`);
+    expect(r.statusCode).toBe(200);
+    expect(r.success).toBe(true);
+  });
+
+  test('failOnRedirect stops at the 3xx and fails it', async () => {
+    const r = await measureResponseTime(`${base}/private`, 'GET', undefined, undefined, undefined, {
+      failOnRedirect: true
+    });
+    expect(r.statusCode).toBe(307);
+    expect(r.success).toBe(false);
+  });
+
+  test('mustInclude fails a 200 page without the expected text', async () => {
+    const check = { mustInclude: 'Analytics' };
+    const limited = await measureResponseTime(`${base}/limited`, 'GET', undefined, undefined, undefined, check);
+    const real = await measureResponseTime(`${base}/page`, 'GET', undefined, undefined, undefined, check);
+    expect(limited.success).toBe(false);
+    expect(real.success).toBe(true);
   });
 });

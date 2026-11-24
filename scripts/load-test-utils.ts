@@ -73,7 +73,22 @@ export type EndpointConfig = {
    * the scenario's label/fallback when `pathPool` is absent or empty.
    */
   pathPool?: string[];
+  /**
+   * Count a 3xx as a failure and do not follow it. For an authenticated
+   * page a redirect means the session was refused, usually to a login page
+   * that answers 200 and would otherwise read as a success.
+   */
+  failOnRedirect?: boolean;
+  /**
+   * Text the response body must contain to count as a success: something
+   * only the real page renders, so an error or rate-limit page that answers
+   * 200 fails instead.
+   */
+  mustInclude?: string;
 };
+
+/** The per-endpoint checks measureResponseTime applies to each response. */
+export type ResponseCheck = Pick<EndpointConfig, 'failOnRedirect' | 'mustInclude'>;
 
 export type RequestResult = {
   statusCode: number;
@@ -153,13 +168,15 @@ export async function measureResponseTime(
   method = 'GET',
   body?: string,
   headers?: Record<string, string>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  check: ResponseCheck = {}
 ): Promise<RequestResult> {
   const start = performance.now();
   try {
     const response = await fetch(url, {
       method,
       signal,
+      redirect: check.failOnRedirect ? 'manual' : 'follow',
       body: method !== 'GET' ? body : undefined,
       headers: {
         Accept: 'text/html,application/json',
@@ -173,7 +190,11 @@ export async function measureResponseTime(
     return {
       statusCode: response.status,
       latencyMs,
-      success: response.status >= 200 && response.status < 400,
+      success:
+        response.status >= 200 &&
+        response.status < (check.failOnRedirect ? 300 : 400) &&
+        (check.mustInclude === undefined ||
+          responseBody.includes(check.mustInclude)),
       bodySize: responseBody.length
     };
   } catch {
@@ -196,10 +217,18 @@ async function workerLoop(
   headers: Record<string, string> | undefined,
   endTs: number,
   results: RequestResult[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  check: ResponseCheck = {}
 ): Promise<void> {
   while (performance.now() < endTs && !signal?.aborted) {
-    const result = await measureResponseTime(url, method, body, headers, signal);
+    const result = await measureResponseTime(
+      url,
+      method,
+      body,
+      headers,
+      signal,
+      check
+    );
     if (signal?.aborted) return;
     results.push(result);
   }
@@ -221,6 +250,10 @@ async function runScenario(
   const urlFor = (path: string) => `${baseUrl}${path}`;
   const method = endpoint.method ?? 'GET';
   const label = endpoint.label ?? endpoint.path;
+  const check: ResponseCheck = {
+    failOnRedirect: endpoint.failOnRedirect,
+    mustInclude: endpoint.mustInclude
+  };
 
   // Warm-up phase
   if (warmupRequests > 0) {
@@ -237,7 +270,8 @@ async function runScenario(
           method,
           endpoint.body,
           warmupHeaders,
-          signal
+          signal,
+          check
         )
     );
     await Promise.allSettled(warmups);
@@ -262,7 +296,8 @@ async function runScenario(
       headers,
       endTs,
       results,
-      signal
+      signal,
+      check
     );
   });
   await Promise.allSettled(workers);
