@@ -4,12 +4,15 @@
   "workspaces": {
     "": {
       "name": "@bitclaw/sqlite",
+      "dependencies": {
+        "@bitclaw/mutex": "^0.1.0",
+      },
       "devDependencies": {
-        "@biomejs/biome": "^2.4.15",
-        "@types/bun": "^1.3.9",
-        "@types/node": "^22.0.0",
-        "knip": "^6.12.1",
-        "typescript": "^5.8.3",
+        "@biomejs/biome": "2.4.15",
+        "@types/bun": "1.3.14",
+        "@types/node": "22.19.19",
+        "knip": "6.14.1",
+        "typescript": "5.9.3",
       },
     },
   },
@@ -31,6 +34,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.4.15", "", { "os": "win32", "cpu": "arm64" }, "sha512-ouhkYdlhp/1GghEJPdWwD/Vi3gQ1nFxuSpMolWsbq3Lsq3QUR4jl6UdhhscdCugKU5vOEuMiJhvKj66O0OCq+w=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.4.15", "", { "os": "win32", "cpu": "x64" }, "sha512-zBrGq5mx5wwpnow4+2BxUvleDM+GNd4sLbPaMapsSLQLD0NGRCquqPBTgN+7XkUteHvj7M+BstuI8tmnV7+HgQ=="],
+
+    "@bitclaw/mutex": ["@bitclaw/mutex@0.1.0", "", {}, "sha512-aPCi0xaSeltZoGkJnuKKjP/9IoryCuNbYYoI73PhDf9BYpkBFu8qQTP+RvHUlNQg2e1I70ykrjVIRn/gni0RHw=="],
 
     "@emnapi/core": ["@emnapi/core@1.10.0", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.1", "tslib": "^2.4.0" } }, "sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw=="],
 
